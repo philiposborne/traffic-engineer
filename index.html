@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Traffic Engineer</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div id="top-bar">
+    <h1>Traffic Engineer</h1>
+    <span class="scenario-title">Rush Hour Crossroads</span>
+    <span id="mode-label" class="mode-edit">EDIT MODE</span>
+  </div>
+
+  <div id="main-content">
+
+    <!-- Left panel: tools + budget + selection -->
+    <div id="left-panel" class="panel">
+
+      <div class="panel-section">
+        <h3>Tools</h3>
+        <div class="tool-btn active" data-tool="select">
+          <span class="tool-icon">↖</span>
+          <span class="tool-label">Select</span>
+        </div>
+        <div class="tool-btn" data-tool="add-lane">
+          <span class="tool-icon">⇔</span>
+          <span class="tool-label">Add Lane</span>
+          <span class="tool-cost">$15k</span>
+        </div>
+        <div class="tool-btn" data-tool="remove-lane">
+          <span class="tool-icon">⇥</span>
+          <span class="tool-label">Remove Lane</span>
+        </div>
+        <div class="tool-btn" data-tool="signal">
+          <span class="tool-icon">🚦</span>
+          <span class="tool-label">Signal</span>
+          <span class="tool-cost">$10k</span>
+        </div>
+        <div class="tool-btn" data-tool="roundabout">
+          <span class="tool-icon">⟳</span>
+          <span class="tool-label">Roundabout</span>
+          <span class="tool-cost">$20k</span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Budget</h3>
+        <div class="budget-display">
+          <span class="budget-amount">$<span id="budget-value">100</span></span>
+          <span class="budget-unit">k</span>
+        </div>
+        <div class="budget-bar">
+          <div id="budget-bar-fill"></div>
+        </div>
+      </div>
+
+      <div class="panel-section" style="flex:1">
+        <h3>Selection</h3>
+        <div id="selection-info">
+          <span class="hint">Click a road or junction</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Canvas -->
+    <div id="canvas-container">
+      <canvas id="game-canvas"></canvas>
+      <div id="msg-bar"></div>
+    </div>
+
+    <!-- Right panel: stats + score + controls -->
+    <div id="right-panel" class="panel">
+
+      <div class="panel-section">
+        <h3>Live Stats</h3>
+        <div class="stat-row">
+          <span class="stat-label">Throughput</span>
+          <span class="stat-value" id="stat-throughput">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Avg Wait</span>
+          <span class="stat-value" id="stat-wait">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Congestion</span>
+          <span class="stat-value" id="stat-congestion">--</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Cars active</span>
+          <span class="stat-value" id="stat-cars">--</span>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Score</h3>
+        <div class="score-display">
+          <span id="score-value">--</span>
+          <span class="score-denom">/100</span>
+        </div>
+        <div class="score-bar">
+          <div id="score-fill"></div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>Controls</h3>
+        <div class="btn-row">
+          <button id="btn-simulate" class="btn-primary">▶  Simulate</button>
+          <button id="btn-edit"     class="btn-secondary" style="display:none">✏  Edit</button>
+          <button id="btn-reset"    class="btn-danger">↺  Reset</button>
+        </div>
+      </div>
+
+      <div class="panel-section" style="flex:1">
+        <h3>How to Play</h3>
+        <p style="font-size:11px;line-height:1.7;color:#7f8c8d;">
+          1. <b style="color:#dfe6e9">Select</b> a junction or road to inspect it.<br>
+          2. Use tools to <b style="color:#dfe6e9">widen roads</b>, add <b style="color:#dfe6e9">traffic signals</b>, or build <b style="color:#dfe6e9">roundabouts</b>.<br>
+          3. Click <b style="color:#00b894">Simulate</b> to run traffic.<br>
+          4. Aim for a high <b style="color:#dfe6e9">Score</b> by reducing wait times and congestion.<br><br>
+          <b style="color:#f5a623">Tip:</b> The two junctions are the main bottlenecks. Try different fixes and compare!
+        </p>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/network.js"></script>
+  <script src="js/scenario.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/tools.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
