@@ -71,18 +71,40 @@ class TrafficSimulation {
   }
 
   _updateCar(car, dt) {
-    // Roundabout ring transit — car arcs around the ring visually
+    // Roundabout ring transit — car arcs (or queues) on the ring
     if (car.state === 'roundabout') {
-      if (car.raTransit.t < car.raTransit.duration) car.raTransit.t += dt;
+      // Ring car-following: slow/stop behind any car ahead on the same ring
+      if (car.raTransit.t < car.raTransit.duration) {
+        const myFrac  = car.raTransit.t / car.raTransit.duration;
+        const myAngle = car.raTransit.startA + car.raTransit.sweep * myFrac;
+        let minArcGap = Infinity;
+        for (const other of this.cars) {
+          if (other === car || !other.raTransit) continue;
+          if (other.raTransit.cx !== car.raTransit.cx || other.raTransit.cy !== car.raTransit.cy) continue;
+          const oFrac  = other.raTransit.duration > 0 ? Math.min(1, other.raTransit.t / other.raTransit.duration) : 1;
+          const oAngle = other.raTransit.startA + other.raTransit.sweep * oFrac;
+          let angDist;
+          if (car.raTransit.sweep >= 0) {
+            angDist = ((oAngle - myAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+          } else {
+            angDist = ((myAngle - oAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+          }
+          if (angDist > 0.001 && angDist < minArcGap) minArcGap = angDist;
+        }
+        const arcGap = minArcGap * CONFIG.RA_RING_RADIUS;
+        const speedFactor = arcGap < CONFIG.FOLLOW_DISTANCE
+          ? Math.max(0, (arcGap - CONFIG.MIN_GAP) / (CONFIG.FOLLOW_DISTANCE - CONFIG.MIN_GAP))
+          : 1;
+        car.raTransit.t = Math.min(car.raTransit.duration, car.raTransit.t + dt * speedFactor);
+      }
 
+      // Arc complete — try to step onto the exit road.
+      // Freeze at ring exit if jammed; pressure backs up to approach roads.
       if (car.raTransit.t >= car.raTransit.duration) {
-        // Arc complete — try to step onto the exit road.
-        // If the exit is jammed, freeze at the ring exit point (still counted
-        // as onRing) so pressure backs up onto the approach roads.
         const edge = this.network.edges.get(car.edgeId);
         if (!edge) { car.raTransit = null; car.state = 'done'; return; }
 
-        const exitP  = Math.min(0.4, CONFIG.RA_RING_RADIUS / edge.length);
+        const exitP  = car.raTransit.exitProgress;
         const blockP = exitP + (CONFIG.MIN_GAP + CONFIG.CAR_LENGTH) / edge.length;
         let hasRoom  = true;
         for (const other of this.cars) {
@@ -92,13 +114,12 @@ class TrafficSimulation {
           }
         }
         if (hasRoom) {
-          const lanes = car.fwd ? edge.lanesForward : edge.lanesBackward;
-          car.lane = car.id % Math.max(1, lanes);
+          car.lane     = car.raTransit.exitLane;
           car.progress = exitP;
           car.raTransit = null;
           car.state = 'moving';
         }
-        // else: stay frozen at arc endpoint; onRing count keeps new cars out
+        // else: frozen at arc endpoint, still onRing, queues back to approaches
       }
       return;
     }
@@ -173,7 +194,10 @@ class TrafficSimulation {
     return Math.max(0.5, Math.min(0.97, (edge.length - stopDist) / edge.length));
   }
 
-  // Begin arcing a car around the roundabout ring from its entry point to its exit point
+  // Begin arcing a car around the roundabout ring from its entry point to its exit point.
+  // Both the entry and exit positions are derived from the car's actual lane geometry,
+  // producing a spiral arc that starts where the car stopped and ends in the correct lane —
+  // no positional snap on either end.
   _startRoundaboutTransit(car, roundaboutNode, currentEdge, currentFwd) {
     if (car.routeIdx + 1 >= car.route.length) {
       this._completedLog.push({ t: this.simTime, wait: car.waitTime });
@@ -181,14 +205,15 @@ class TrafficSimulation {
       return;
     }
 
-    const RA_R = CONFIG.RA_RING_RADIUS;
+    // Entry: use the car's actual stop position to derive angle + radius
+    const stopP    = this._getStopProgress(currentEdge, currentFwd);
+    const entryPos = currentEdge.carPosition(stopP, currentFwd, car.lane);
+    const eDx = entryPos.x - roundaboutNode.x;
+    const eDy = entryPos.y - roundaboutNode.y;
+    const entryAngle  = Math.atan2(eDy, eDx);
+    const entryRadius = Math.hypot(eDx, eDy);
 
-    // Outward angle from roundabout centre toward the approach road
-    const entryAngle = currentFwd
-      ? currentEdge.angle + Math.PI   // edge.to = roundabout
-      : currentEdge.angle;             // edge.from = roundabout
-
-    // Advance to the exit edge
+    // Advance to exit edge
     car.routeIdx++;
     car.progress = 0.0;
 
@@ -196,14 +221,18 @@ class TrafficSimulation {
     const nextEdge = this.network.edges.get(nextStep.id);
     if (!nextEdge) { car.state = 'done'; return; }
 
-    // Outward angle from roundabout centre toward the exit road
-    const exitAngle = nextStep.fwd
-      ? nextEdge.angle                 // nextEdge.from = roundabout
-      : nextEdge.angle + Math.PI;      // nextEdge.to = roundabout
+    // Exit: derive angle + radius from the actual lane position on the exit road
+    const exitLanes    = nextStep.fwd ? nextEdge.lanesForward : nextEdge.lanesBackward;
+    const exitLane     = car.id % Math.max(1, exitLanes);
+    const exitProgress = Math.min(0.4, CONFIG.RA_RING_RADIUS / nextEdge.length);
+    const exitPos  = nextEdge.carPosition(exitProgress, nextStep.fwd, exitLane);
+    const xDx = exitPos.x - roundaboutNode.x;
+    const xDy = exitPos.y - roundaboutNode.y;
+    const exitAngle  = Math.atan2(xDy, xDx);
+    const exitRadius = Math.hypot(xDx, xDy);
 
-    // Canvas Y-down: clockwise on screen = increasing angle (positive sweep).
-    // LHD (UK) roundabouts circulate clockwise on screen.
-    // RHD (US/EU) roundabouts circulate counterclockwise on screen.
+    // Canvas Y-down: CW on screen = increasing angle.
+    // LHD (UK) = CW on screen; RHD (US/EU) = CCW on screen.
     const cwCanvas = CONFIG.DRIVE_SIDE === 'left';
     let sweep;
     if (cwCanvas) {
@@ -214,17 +243,20 @@ class TrafficSimulation {
       if (Math.abs(sweep) < 0.01) sweep -= 2 * Math.PI;
     }
 
-    const arcLen  = Math.abs(sweep) * RA_R;
+    const arcLen  = Math.abs(sweep) * CONFIG.RA_RING_RADIUS;
     const duration = arcLen / (CONFIG.MAX_SPEED * 0.55);
 
     car.raTransit = {
-      cx: roundaboutNode.x,
-      cy: roundaboutNode.y,
-      r:  RA_R,
-      startA: entryAngle,
+      cx:           roundaboutNode.x,
+      cy:           roundaboutNode.y,
+      startR:       entryRadius,
+      endR:         exitRadius,
+      startA:       entryAngle,
       sweep,
-      t:  0,
+      t:            0,
       duration,
+      exitLane,
+      exitProgress,
     };
     car.state = 'roundabout';
   }
@@ -234,18 +266,15 @@ class TrafficSimulation {
     const slotFree = this.simTime >= (node.lastExitTime[key] || 0);
     if (!slotFree) return false;
 
-    // Check next edge has room; skip cars currently on a roundabout ring.
-    // Roundabout exits land cars at RA_RING_RADIUS from the node, so the
-    // blocking zone must extend to cover that landing position.
-    if (car.routeIdx + 1 < car.route.length) {
+    // Check next edge has room at its start.
+    // For roundabouts, ring car-following handles spacing — skip this check.
+    if (node.type !== 'roundabout' && car.routeIdx + 1 < car.route.length) {
       const nextStep = car.route[car.routeIdx + 1];
       const nextEdge = this.network.edges.get(nextStep.id);
       if (!nextEdge) return false;
-      const entryDist = node.type === 'roundabout' ? CONFIG.RA_RING_RADIUS : 0;
-      const blockProg = (entryDist + CONFIG.MIN_GAP + CONFIG.CAR_LENGTH) / nextEdge.length;
       for (const other of this.cars) {
         if (other === car || other.state === 'done' || other.raTransit) continue;
-        if (other.edgeId === nextStep.id && other.fwd === nextStep.fwd && other.progress < blockProg) return false;
+        if (other.edgeId === nextStep.id && other.fwd === nextStep.fwd && other.progress < 0.06) return false;
       }
     }
 

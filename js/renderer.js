@@ -251,9 +251,11 @@ class Renderer {
       const frac = car.raTransit.duration > 0
         ? Math.min(1, car.raTransit.t / car.raTransit.duration) : 1;
       const a = car.raTransit.startA + car.raTransit.sweep * frac;
+      // Spiral: radius interpolates from stop position (startR) to lane exit (endR)
+      const r = car.raTransit.startR + frac * (car.raTransit.endR - car.raTransit.startR);
       pos = {
-        x: car.raTransit.cx + car.raTransit.r * Math.cos(a),
-        y: car.raTransit.cy + car.raTransit.r * Math.sin(a),
+        x: car.raTransit.cx + r * Math.cos(a),
+        y: car.raTransit.cy + r * Math.sin(a),
         angle: a + (car.raTransit.sweep >= 0 ? Math.PI / 2 : -Math.PI / 2),
       };
     } else {
