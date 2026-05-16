@@ -8,8 +8,8 @@ const CONFIG = {
   CAR_WIDTH: 7.5,
 
   MAX_SPEED: 90,
-  FOLLOW_DISTANCE: 18,
-  MIN_GAP: 5,
+  FOLLOW_DISTANCE: 32,
+  MIN_GAP: 15,
 
   SIM_SPEED: 2.5,
 
@@ -24,6 +24,8 @@ const CONFIG = {
   SIGNAL_YELLOW: 3,
 
   ROUNDABOUT_CAPACITY: 5,
+  RA_RING_RADIUS: 38,   // midpoint radius of roundabout ring (for car arc)
+  RA_OUTER_STOP: 48,    // stop distance from roundabout centre
 
   // Budget
   STARTING_BUDGET: 100,

@@ -245,12 +245,24 @@ class Renderer {
 
   _drawCar(ctx, car, network) {
     if (car.state === 'done') return;
-    const edge = network.edges.get(car.edgeId);
-    if (!edge) return;
 
-    const lanes = car.fwd ? edge.lanesForward : edge.lanesBackward;
-    const lane  = Math.min(car.lane, Math.max(0, lanes - 1));
-    const pos   = edge.carPosition(car.progress, car.fwd, lane);
+    let pos;
+    if (car.raTransit) {
+      const frac = car.raTransit.duration > 0
+        ? Math.min(1, car.raTransit.t / car.raTransit.duration) : 1;
+      const a = car.raTransit.startA + car.raTransit.sweep * frac;
+      pos = {
+        x: car.raTransit.cx + car.raTransit.r * Math.cos(a),
+        y: car.raTransit.cy + car.raTransit.r * Math.sin(a),
+        angle: a + (car.raTransit.sweep >= 0 ? Math.PI / 2 : -Math.PI / 2),
+      };
+    } else {
+      const edge = network.edges.get(car.edgeId);
+      if (!edge) return;
+      const lanes = car.fwd ? edge.lanesForward : edge.lanesBackward;
+      const lane  = Math.min(car.lane, Math.max(0, lanes - 1));
+      pos = edge.carPosition(car.progress, car.fwd, lane);
+    }
 
     ctx.save();
     ctx.translate(pos.x, pos.y);
