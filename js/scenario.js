@@ -13,14 +13,14 @@ function buildScenario() {
   //             |                |
   //        S1(285,515)     S2(515,515)
 
-  const W  = net.addNode( 40, 290, 'terminal'); // 0
-  const A  = net.addNode(285, 290, 'basic');     // 1  ← player will fix this
-  const B  = net.addNode(515, 290, 'basic');     // 2  ← player will fix this
-  const E  = net.addNode(760, 290, 'terminal'); // 3
-  const N1 = net.addNode(285,  65, 'terminal'); // 4
-  const S1 = net.addNode(285, 515, 'terminal'); // 5
-  const N2 = net.addNode(515,  65, 'terminal'); // 6
-  const S2 = net.addNode(515, 515, 'terminal'); // 7
+  const W  = net.addNode( 40, 290, 'terminal'); W.color  = CONFIG.C.DEST[0]; // red
+  const A  = net.addNode(285, 290, 'basic');
+  const B  = net.addNode(515, 290, 'basic');
+  const E  = net.addNode(760, 290, 'terminal'); E.color  = CONFIG.C.DEST[1]; // blue
+  const N1 = net.addNode(285,  65, 'terminal'); N1.color = CONFIG.C.DEST[2]; // green
+  const S1 = net.addNode(285, 515, 'terminal'); S1.color = CONFIG.C.DEST[3]; // orange
+  const N2 = net.addNode(515,  65, 'terminal'); N2.color = CONFIG.C.DEST[4]; // purple
+  const S2 = net.addNode(515, 515, 'terminal'); S2.color = CONFIG.C.DEST[5]; // teal
 
   // --- Edges ---
   // All 1 lane each direction initially

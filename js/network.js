@@ -78,16 +78,12 @@ class RoadEdge {
 
   // World position of a car: progress 0→1 (from its start), direction, lane index
   carPosition(progress, forward, laneIndex) {
-    // In local road coords (origin = this.from, x-axis = this.angle):
-    // Forward cars travel from x=0 to x=length (localX = progress * length)
-    // Backward cars travel from x=length to x=0  (localX = (1-progress) * length)
     const localX = forward ? progress * this.length : (1 - progress) * this.length;
 
-    // Lateral offset from visual centre of road:
-    // Forward lanes sit on the positive-y side (right of road, right-hand traffic)
-    // Backward lanes sit on the negative-y side
+    // keep-right: forward lanes on +Y side; keep-left: forward on −Y side
+    const side = CONFIG.DRIVE_SIDE === 'right' ? 1 : -1;
     const laneCenter = (laneIndex + 0.5) * CONFIG.LANE_WIDTH;
-    const localY = forward ? laneCenter : -laneCenter;
+    const localY = forward ? side * laneCenter : -side * laneCenter;
 
     const cosA = Math.cos(this.angle);
     const sinA = Math.sin(this.angle);

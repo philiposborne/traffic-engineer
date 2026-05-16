@@ -1,4 +1,6 @@
 const CONFIG = {
+  DRIVE_SIDE: 'right', // 'right' = keep right | 'left' = keep left
+
   LANE_WIDTH: 14,
   SHOULDER_WIDTH: 3,
 
@@ -52,6 +54,10 @@ const CONFIG = {
 
     CARS: ['#0984e3', '#d63031', '#00b894', '#e17055', '#6c5ce7', '#00cec9',
            '#fdcb6e', '#a29bfe', '#55efc4', '#fd79a8'],
+
+    // Destination colours — one per terminal node in each scenario
+    DEST: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c',
+           '#e67e22', '#e91e63'],
 
     CONGESTION: 'rgba(220,50,50,0.20)',
     SELECTION_FILL: 'rgba(74,144,217,0.25)',
