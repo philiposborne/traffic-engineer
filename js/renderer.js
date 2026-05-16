@@ -251,8 +251,19 @@ class Renderer {
       const frac = car.raTransit.duration > 0
         ? Math.min(1, car.raTransit.t / car.raTransit.duration) : 1;
       const a = car.raTransit.startA + car.raTransit.sweep * frac;
-      // Spiral: radius interpolates from stop position (startR) to lane exit (endR)
-      const r = car.raTransit.startR + frac * (car.raTransit.endR - car.raTransit.startR);
+      // Three-phase radius: blend from stop line → ring midline → exit lane.
+      // Car settles into RA_RING_RADIUS quickly, traverses there, then drifts to exit.
+      const E = 0.22;
+      let r;
+      if (frac <= E) {
+        const s = (t => t * t * (3 - 2 * t))(frac / E);
+        r = car.raTransit.startR + s * (CONFIG.RA_RING_RADIUS - car.raTransit.startR);
+      } else if (frac >= 1 - E) {
+        const s = (t => t * t * (3 - 2 * t))((frac - (1 - E)) / E);
+        r = CONFIG.RA_RING_RADIUS + s * (car.raTransit.endR - CONFIG.RA_RING_RADIUS);
+      } else {
+        r = CONFIG.RA_RING_RADIUS;
+      }
       pos = {
         x: car.raTransit.cx + r * Math.cos(a),
         y: car.raTransit.cy + r * Math.sin(a),
