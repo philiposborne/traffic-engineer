@@ -25,7 +25,7 @@ const CONFIG = {
 
   ROUNDABOUT_CAPACITY: 5,
   RA_RING_RADIUS: 38,   // midpoint radius of roundabout ring (for car arc)
-  RA_OUTER_STOP: 48,    // stop distance from roundabout centre
+  RA_OUTER_STOP: 44,    // stop distance from roundabout centre (= outer ring edge)
 
   // Budget
   STARTING_BUDGET: 100,
