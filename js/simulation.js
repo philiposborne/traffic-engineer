@@ -75,12 +75,15 @@ class TrafficSimulation {
     if (car.state === 'roundabout') {
       car.raTransit.t += dt;
       if (car.raTransit.t >= car.raTransit.duration) {
+        const edge = this.network.edges.get(car.edgeId);
         car.raTransit = null;
         car.state = 'moving';
-        const edge = this.network.edges.get(car.edgeId);
         if (edge) {
           const lanes = car.fwd ? edge.lanesForward : edge.lanesBackward;
           car.lane = car.id % Math.max(1, lanes);
+          // Start at the ring-edge distance on the exit road so the car
+          // doesn't snap back to the node centre after arcing to the ring.
+          car.progress = Math.min(0.4, CONFIG.RA_RING_RADIUS / edge.length);
         }
       }
       return;
@@ -182,9 +185,10 @@ class TrafficSimulation {
       ? nextEdge.angle                 // nextEdge.from = roundabout
       : nextEdge.angle + Math.PI;      // nextEdge.to = roundabout
 
-    // Right-hand traffic: clockwise in canvas (Y-down) = positive sweep
-    // Left-hand traffic: counterclockwise = negative sweep
-    const cwCanvas = CONFIG.DRIVE_SIDE === 'right';
+    // Canvas Y-down: clockwise on screen = increasing angle (positive sweep).
+    // LHD (UK) roundabouts circulate clockwise on screen.
+    // RHD (US/EU) roundabouts circulate counterclockwise on screen.
+    const cwCanvas = CONFIG.DRIVE_SIDE === 'left';
     let sweep;
     if (cwCanvas) {
       sweep = ((exitAngle - entryAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
