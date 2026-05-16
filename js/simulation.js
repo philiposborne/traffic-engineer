@@ -73,18 +73,32 @@ class TrafficSimulation {
   _updateCar(car, dt) {
     // Roundabout ring transit — car arcs around the ring visually
     if (car.state === 'roundabout') {
-      car.raTransit.t += dt;
+      if (car.raTransit.t < car.raTransit.duration) car.raTransit.t += dt;
+
       if (car.raTransit.t >= car.raTransit.duration) {
+        // Arc complete — try to step onto the exit road.
+        // If the exit is jammed, freeze at the ring exit point (still counted
+        // as onRing) so pressure backs up onto the approach roads.
         const edge = this.network.edges.get(car.edgeId);
-        car.raTransit = null;
-        car.state = 'moving';
-        if (edge) {
+        if (!edge) { car.raTransit = null; car.state = 'done'; return; }
+
+        const exitP  = Math.min(0.4, CONFIG.RA_RING_RADIUS / edge.length);
+        const blockP = exitP + (CONFIG.MIN_GAP + CONFIG.CAR_LENGTH) / edge.length;
+        let hasRoom  = true;
+        for (const other of this.cars) {
+          if (other === car || other.state === 'done' || other.raTransit) continue;
+          if (other.edgeId === edge.id && other.fwd === car.fwd && other.progress < blockP) {
+            hasRoom = false; break;
+          }
+        }
+        if (hasRoom) {
           const lanes = car.fwd ? edge.lanesForward : edge.lanesBackward;
           car.lane = car.id % Math.max(1, lanes);
-          // Start at the ring-edge distance on the exit road so the car
-          // doesn't snap back to the node centre after arcing to the ring.
-          car.progress = Math.min(0.4, CONFIG.RA_RING_RADIUS / edge.length);
+          car.progress = exitP;
+          car.raTransit = null;
+          car.state = 'moving';
         }
+        // else: stay frozen at arc endpoint; onRing count keeps new cars out
       }
       return;
     }
@@ -149,10 +163,12 @@ class TrafficSimulation {
 
     let maxHalf = 0;
     destNode.edges.forEach(e => { if (e.halfWidth > maxHalf) maxHalf = e.halfWidth; });
-    // Signal nodes: stop behind the signal head (drawn at 28 px from node)
+    // Car front = centre − CAR_LENGTH/2.  Add half-car-length so the front
+    // sits at the stop line rather than past it.
+    // Signal nodes: stop line is just behind the signal head (drawn at 28 px).
     const stopDist = destNode.type === 'signal'
-      ? Math.max(maxHalf + 2, 32)
-      : maxHalf + 2;
+      ? Math.max(maxHalf + 2, 36)
+      : maxHalf + 8;
 
     return Math.max(0.5, Math.min(0.97, (edge.length - stopDist) / edge.length));
   }
@@ -218,14 +234,18 @@ class TrafficSimulation {
     const slotFree = this.simTime >= (node.lastExitTime[key] || 0);
     if (!slotFree) return false;
 
-    // Check next edge has room at its start; skip cars currently on a roundabout ring
+    // Check next edge has room; skip cars currently on a roundabout ring.
+    // Roundabout exits land cars at RA_RING_RADIUS from the node, so the
+    // blocking zone must extend to cover that landing position.
     if (car.routeIdx + 1 < car.route.length) {
       const nextStep = car.route[car.routeIdx + 1];
       const nextEdge = this.network.edges.get(nextStep.id);
       if (!nextEdge) return false;
+      const entryDist = node.type === 'roundabout' ? CONFIG.RA_RING_RADIUS : 0;
+      const blockProg = (entryDist + CONFIG.MIN_GAP + CONFIG.CAR_LENGTH) / nextEdge.length;
       for (const other of this.cars) {
         if (other === car || other.state === 'done' || other.raTransit) continue;
-        if (other.edgeId === nextStep.id && other.fwd === nextStep.fwd && other.progress < 0.06) return false;
+        if (other.edgeId === nextStep.id && other.fwd === nextStep.fwd && other.progress < blockProg) return false;
       }
     }
 
