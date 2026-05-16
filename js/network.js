@@ -131,7 +131,7 @@ class RoadNetwork {
   // Serialize for reset
   snapshot() {
     const ns = [...this.nodes.values()].map(n => ({
-      id: n.id, x: n.x, y: n.y, type: n.type
+      id: n.id, x: n.x, y: n.y, type: n.type, color: n.color || null
     }));
     const es = [...this.edges.values()].map(e => ({
       id: e.id, fromId: e.from.id, toId: e.to.id,
@@ -148,6 +148,7 @@ class RoadNetwork {
     this._eid = snap.eid;
     snap.ns.forEach(n => {
       const node = new RoadNode(n.id, n.x, n.y, n.type);
+      if (n.color) node.color = n.color;
       this.nodes.set(n.id, node);
     });
     snap.es.forEach(e => {

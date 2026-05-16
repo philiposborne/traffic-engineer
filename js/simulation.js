@@ -205,13 +205,14 @@ class TrafficSimulation {
       return;
     }
 
-    // Entry: use the car's actual stop position to derive angle + radius
+    // Entry: use the car's actual stop position for the entry ANGLE (lane-adjusted)
+    // but fix the radius to the ring midline — stops the car appearing on the kerb.
     const stopP    = this._getStopProgress(currentEdge, currentFwd);
     const entryPos = currentEdge.carPosition(stopP, currentFwd, car.lane);
     const eDx = entryPos.x - roundaboutNode.x;
     const eDy = entryPos.y - roundaboutNode.y;
     const entryAngle  = Math.atan2(eDy, eDx);
-    const entryRadius = Math.hypot(eDx, eDy);
+    const entryRadius = CONFIG.RA_RING_RADIUS; // arc begins on the ring, not at the kerb
 
     // Advance to exit edge
     car.routeIdx++;
