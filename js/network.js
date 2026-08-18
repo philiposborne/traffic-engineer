@@ -78,16 +78,12 @@ class RoadEdge {
 
   // World position of a car: progress 0→1 (from its start), direction, lane index
   carPosition(progress, forward, laneIndex) {
-    // In local road coords (origin = this.from, x-axis = this.angle):
-    // Forward cars travel from x=0 to x=length (localX = progress * length)
-    // Backward cars travel from x=length to x=0  (localX = (1-progress) * length)
     const localX = forward ? progress * this.length : (1 - progress) * this.length;
 
-    // Lateral offset from visual centre of road:
-    // Forward lanes sit on the positive-y side (right of road, right-hand traffic)
-    // Backward lanes sit on the negative-y side
+    // keep-right: forward lanes on +Y side; keep-left: forward on −Y side
+    const side = CONFIG.DRIVE_SIDE === 'right' ? 1 : -1;
     const laneCenter = (laneIndex + 0.5) * CONFIG.LANE_WIDTH;
-    const localY = forward ? laneCenter : -laneCenter;
+    const localY = forward ? side * laneCenter : -side * laneCenter;
 
     const cosA = Math.cos(this.angle);
     const sinA = Math.sin(this.angle);
@@ -135,7 +131,7 @@ class RoadNetwork {
   // Serialize for reset
   snapshot() {
     const ns = [...this.nodes.values()].map(n => ({
-      id: n.id, x: n.x, y: n.y, type: n.type
+      id: n.id, x: n.x, y: n.y, type: n.type, color: n.color || null
     }));
     const es = [...this.edges.values()].map(e => ({
       id: e.id, fromId: e.from.id, toId: e.to.id,
@@ -152,6 +148,7 @@ class RoadNetwork {
     this._eid = snap.eid;
     snap.ns.forEach(n => {
       const node = new RoadNode(n.id, n.x, n.y, n.type);
+      if (n.color) node.color = n.color;
       this.nodes.set(n.id, node);
     });
     snap.es.forEach(e => {

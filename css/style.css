@@ -59,6 +59,24 @@ body {
 .mode-edit { background: rgba(116,185,255,0.2); color: #74b9ff; }
 .mode-sim  { background: rgba(0,184,148,0.2);   color: #00b894; }
 
+/* Drive side toggle — lives in the top bar, auto-width */
+.btn-drive-side {
+  width: auto;
+  padding: 5px 12px;
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 20px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.btn-drive-side:hover  { background: rgba(255,255,255,0.20); }
+.btn-drive-side:active { transform: scale(0.96); }
+
 /* ── Main layout ── */
 #main-content {
   display: flex;

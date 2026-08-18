@@ -77,6 +77,7 @@ class ToolManager {
     const tool    = this.activeTool;
     const network = this.game.network;
     let cost      = 0;
+    const savedNodeTypes = []; // [{node, origType}] for undo
 
     if (tool === 'add-lane') {
       // Add one lane in each direction
@@ -103,6 +104,7 @@ class ToolManager {
       // Convert end nodes to signals if they're basic
       [edge.from, edge.to].forEach(n => {
         if (n.type === 'basic') {
+          savedNodeTypes.push({ node: n, origType: n.type });
           n.type = 'signal';
           cost += CONFIG.COST_SIGNAL;
         }
@@ -112,6 +114,7 @@ class ToolManager {
       // Convert end nodes
       [edge.from, edge.to].forEach(n => {
         if (n.type === 'basic' || n.type === 'signal') {
+          savedNodeTypes.push({ node: n, origType: n.type });
           n.type = 'roundabout';
           cost  += CONFIG.COST_ROUNDABOUT;
         }
@@ -119,8 +122,10 @@ class ToolManager {
     }
 
     if (!this.game.spendBudget(cost)) {
-      // Undo
+      // Undo all changes
       if (tool === 'add-lane') { edge.lanesForward--; edge.lanesBackward--; }
+      savedNodeTypes.forEach(({ node, origType }) => { node.type = origType; });
+      this.game.showMessage('Not enough budget!');
     } else {
       this.game.setSelection({ type: 'edge', id: edge.id });
     }
@@ -129,6 +134,8 @@ class ToolManager {
   _applyToNode(node) {
     const tool = this.activeTool;
     let cost   = 0;
+    const origType    = node.type;
+    const laneChanges = []; // [{edge, fwdDelta, bwdDelta}] for undo
 
     if (tool === 'signal') {
       if (node.type === 'basic') {
@@ -155,8 +162,10 @@ class ToolManager {
     } else if (tool === 'add-lane') {
       // Add lane on all connected roads (one step)
       node.edges.forEach(edge => {
-        if (edge.from === node && edge.lanesForward < 4)  { edge.lanesForward++;  cost += CONFIG.COST_ADD_LANE; }
-        if (edge.to   === node && edge.lanesBackward < 4) { edge.lanesBackward++; cost += CONFIG.COST_ADD_LANE; }
+        let fwdDelta = 0, bwdDelta = 0;
+        if (edge.from === node && edge.lanesForward < 4)  { edge.lanesForward++;  fwdDelta = 1; cost += CONFIG.COST_ADD_LANE; }
+        if (edge.to   === node && edge.lanesBackward < 4) { edge.lanesBackward++; bwdDelta = 1; cost += CONFIG.COST_ADD_LANE; }
+        if (fwdDelta || bwdDelta) laneChanges.push({ edge, fwdDelta, bwdDelta });
       });
 
     } else if (tool === 'select') {
@@ -166,9 +175,12 @@ class ToolManager {
 
     if (cost > 0 && !this.game.spendBudget(cost)) {
       this.game.showMessage('Not enough budget!');
-      // Undo
-      if (tool === 'roundabout') node.type = 'basic';
-      if (tool === 'signal') node.type = 'basic';
+      // Undo all changes, restoring exact original state
+      node.type = origType;
+      laneChanges.forEach(({ edge, fwdDelta, bwdDelta }) => {
+        edge.lanesForward  -= fwdDelta;
+        edge.lanesBackward -= bwdDelta;
+      });
       return;
     }
 

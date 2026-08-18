@@ -1,4 +1,6 @@
 const CONFIG = {
+  DRIVE_SIDE: 'right', // 'right' = keep right | 'left' = keep left
+
   LANE_WIDTH: 14,
   SHOULDER_WIDTH: 3,
 
@@ -6,8 +8,8 @@ const CONFIG = {
   CAR_WIDTH: 7.5,
 
   MAX_SPEED: 90,
-  FOLLOW_DISTANCE: 18,
-  MIN_GAP: 5,
+  FOLLOW_DISTANCE: 32,
+  MIN_GAP: 15,
 
   SIM_SPEED: 2.5,
 
@@ -22,6 +24,8 @@ const CONFIG = {
   SIGNAL_YELLOW: 3,
 
   ROUNDABOUT_CAPACITY: 5,
+  RA_RING_RADIUS: 38,   // midpoint radius of roundabout ring (for car arc)
+  RA_OUTER_STOP: 44,    // stop distance from roundabout centre (= outer ring edge)
 
   // Budget
   STARTING_BUDGET: 100,
@@ -52,6 +56,10 @@ const CONFIG = {
 
     CARS: ['#0984e3', '#d63031', '#00b894', '#e17055', '#6c5ce7', '#00cec9',
            '#fdcb6e', '#a29bfe', '#55efc4', '#fd79a8'],
+
+    // Destination colours — one per terminal node in each scenario
+    DEST: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c',
+           '#e67e22', '#e91e63'],
 
     CONGESTION: 'rgba(220,50,50,0.20)',
     SELECTION_FILL: 'rgba(74,144,217,0.25)',

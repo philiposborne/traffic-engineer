@@ -12,11 +12,15 @@ class Car {
     this.speed    = 0;
     this.lane     = 0;        // lane index within direction
 
-    this.state    = 'moving'; // 'moving' | 'waiting' | 'done'
+    this.state    = 'moving'; // 'moving' | 'waiting' | 'roundabout' | 'done'
     this.waitTime = 0;
     this.travelTime = 0;
 
+    this.destNodeId = null;
     this.color = CONFIG.C.CARS[id % CONFIG.C.CARS.length];
+
+    // Set while car arcs around a roundabout ring
+    this.raTransit = null; // {cx, cy, r, startA, sweep, t, duration}
   }
 
   get step()  { return this.route[this.routeIdx]; }
@@ -32,11 +36,8 @@ class TrafficSimulation {
     this.simTime  = 0;
     this._nextId  = 0;
 
-    // Demand spawn timers
-    this._spawnTimers = demands.map(() => Math.random()); // stagger initial spawns
-
-    // Stats window
-    this._completedLog = []; // [{completionTime, waitTime}]
+    this._spawnTimers = demands.map(() => Math.random());
+    this._completedLog = []; // [{t, wait}]
   }
 
   reset() {
@@ -45,7 +46,6 @@ class TrafficSimulation {
     this._nextId  = 0;
     this._spawnTimers = this.demands.map(() => Math.random());
     this._completedLog = [];
-    // Reset all node timers
     this.network.nodes.forEach(n => {
       n.signalTimer = 0; n.signalPhase = 0; n.signalState = 'green';
       n.basicTimer  = 0; n.basicPhase  = 0;
@@ -57,10 +57,8 @@ class TrafficSimulation {
   update(dt) {
     this.simTime += dt;
 
-    // Update intersection timers
     this.network.nodes.forEach(n => n.update(dt));
 
-    // Update cars
     for (const car of this.cars) {
       if (car.state === 'done') continue;
       car.travelTime += dt;
@@ -68,33 +66,81 @@ class TrafficSimulation {
       this._updateCar(car, dt);
     }
 
-    // Spawn new cars
     this._spawnCars(dt);
-
-    // Prune done cars older than a moment
     this.cars = this.cars.filter(c => c.state !== 'done');
   }
 
   _updateCar(car, dt) {
+    // Roundabout ring transit — car arcs (or queues) on the ring
+    if (car.state === 'roundabout') {
+      // Ring car-following: slow/stop behind any car ahead on the same ring
+      if (car.raTransit.t < car.raTransit.duration) {
+        const myFrac  = car.raTransit.t / car.raTransit.duration;
+        const myAngle = car.raTransit.startA + car.raTransit.sweep * myFrac;
+        let minArcGap = Infinity;
+        for (const other of this.cars) {
+          if (other === car || !other.raTransit) continue;
+          if (other.raTransit.cx !== car.raTransit.cx || other.raTransit.cy !== car.raTransit.cy) continue;
+          const oFrac  = other.raTransit.duration > 0 ? Math.min(1, other.raTransit.t / other.raTransit.duration) : 1;
+          const oAngle = other.raTransit.startA + other.raTransit.sweep * oFrac;
+          let angDist;
+          if (car.raTransit.sweep >= 0) {
+            angDist = ((oAngle - myAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+          } else {
+            angDist = ((myAngle - oAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+          }
+          if (angDist > 0.001 && angDist < minArcGap) minArcGap = angDist;
+        }
+        const arcGap = minArcGap * CONFIG.RA_RING_RADIUS;
+        const speedFactor = arcGap < CONFIG.FOLLOW_DISTANCE
+          ? Math.max(0, (arcGap - CONFIG.MIN_GAP) / (CONFIG.FOLLOW_DISTANCE - CONFIG.MIN_GAP))
+          : 1;
+        car.raTransit.t = Math.min(car.raTransit.duration, car.raTransit.t + dt * speedFactor);
+      }
+
+      // Arc complete — try to step onto the exit road.
+      // Freeze at ring exit if jammed; pressure backs up to approach roads.
+      if (car.raTransit.t >= car.raTransit.duration) {
+        const edge = this.network.edges.get(car.edgeId);
+        if (!edge) { car.raTransit = null; car.state = 'done'; return; }
+
+        const exitP  = car.raTransit.exitProgress;
+        const blockP = exitP + (CONFIG.MIN_GAP + CONFIG.CAR_LENGTH) / edge.length;
+        let hasRoom  = true;
+        for (const other of this.cars) {
+          if (other === car || other.state === 'done' || other.raTransit) continue;
+          if (other.edgeId === edge.id && other.fwd === car.fwd && other.progress < blockP) {
+            hasRoom = false; break;
+          }
+        }
+        if (hasRoom) {
+          car.lane     = car.raTransit.exitLane;
+          car.progress = exitP;
+          car.raTransit = null;
+          car.state = 'moving';
+        }
+        // else: frozen at arc endpoint, still onRing, queues back to approaches
+      }
+      return;
+    }
+
     const edge = this.network.edges.get(car.edgeId);
     if (!edge) { car.state = 'done'; return; }
 
-    const STOP_AT = 0.97; // progress at which car waits for intersection
+    const stopAt = this._getStopProgress(edge, car.fwd);
 
     if (car.state === 'moving') {
-      // Find nearest car ahead on same edge+direction
       let minGap = Infinity;
       const myDist = car.progress * edge.length;
 
       for (const other of this.cars) {
-        if (other === car || other.state === 'done') continue;
+        if (other === car || other.state === 'done' || other.raTransit) continue;
         if (other.edgeId !== car.edgeId || other.fwd !== car.fwd) continue;
         const otherDist = other.progress * edge.length;
         const gap = (other.fwd ? otherDist - myDist : myDist - otherDist);
         if (gap > 0 && gap < minGap) minGap = gap;
       }
 
-      // Speed based on gap
       let desired = CONFIG.MAX_SPEED;
       if (minGap < CONFIG.FOLLOW_DISTANCE) {
         desired = CONFIG.MAX_SPEED * Math.max(0, (minGap - CONFIG.MIN_GAP) / (CONFIG.FOLLOW_DISTANCE - CONFIG.MIN_GAP));
@@ -102,13 +148,12 @@ class TrafficSimulation {
       car.speed = desired;
       car.progress += (car.speed * dt) / edge.length;
 
-      if (car.progress >= STOP_AT) {
-        car.progress = STOP_AT;
+      if (car.progress >= stopAt) {
+        car.progress = stopAt;
         car.state = 'waiting';
       }
 
     } else if (car.state === 'waiting') {
-      // Check if we've reached a terminal (just arrived — advance immediately)
       const destNode = car.fwd ? edge.to : edge.from;
 
       if (destNode.type === 'terminal') {
@@ -116,12 +161,103 @@ class TrafficSimulation {
         return;
       }
 
-      // Check intersection permission
       if (this._hasPermission(car, edge, destNode)) {
         this._grantPermission(car, edge, destNode);
-        this._advanceCar(car, edge, destNode);
+        if (destNode.type === 'roundabout') {
+          this._startRoundaboutTransit(car, destNode, edge, car.fwd);
+        } else {
+          this._advanceCar(car, edge, destNode);
+        }
       }
     }
+  }
+
+  // Progress value at which a car stops to wait for its destination node
+  _getStopProgress(edge, forward) {
+    const destNode = forward ? edge.to : edge.from;
+    if (destNode.type === 'terminal') return 1.0;
+
+    if (destNode.type === 'roundabout') {
+      const stopDist = CONFIG.RA_OUTER_STOP;
+      return Math.max(0.5, Math.min(0.97, (edge.length - stopDist) / edge.length));
+    }
+
+    let maxHalf = 0;
+    destNode.edges.forEach(e => { if (e.halfWidth > maxHalf) maxHalf = e.halfWidth; });
+    // Car front = centre − CAR_LENGTH/2.  Add half-car-length so the front
+    // sits at the stop line rather than past it.
+    // Signal nodes: stop line is just behind the signal head (drawn at 28 px).
+    const stopDist = destNode.type === 'signal'
+      ? Math.max(maxHalf + 2, 36)
+      : maxHalf + 8;
+
+    return Math.max(0.5, Math.min(0.97, (edge.length - stopDist) / edge.length));
+  }
+
+  // Begin arcing a car around the roundabout ring from its entry point to its exit point.
+  // Both the entry and exit positions are derived from the car's actual lane geometry,
+  // producing a spiral arc that starts where the car stopped and ends in the correct lane —
+  // no positional snap on either end.
+  _startRoundaboutTransit(car, roundaboutNode, currentEdge, currentFwd) {
+    if (car.routeIdx + 1 >= car.route.length) {
+      this._completedLog.push({ t: this.simTime, wait: car.waitTime });
+      car.state = 'done';
+      return;
+    }
+
+    const stopP    = this._getStopProgress(currentEdge, currentFwd);
+    const entryPos = currentEdge.carPosition(stopP, currentFwd, car.lane);
+    const eDx = entryPos.x - roundaboutNode.x;
+    const eDy = entryPos.y - roundaboutNode.y;
+    const entryAngle  = Math.atan2(eDy, eDx);
+    const entryRadius = Math.hypot(eDx, eDy); // actual stop distance from centre
+
+    // Advance to exit edge
+    car.routeIdx++;
+    car.progress = 0.0;
+
+    const nextStep = car.route[car.routeIdx];
+    const nextEdge = this.network.edges.get(nextStep.id);
+    if (!nextEdge) { car.state = 'done'; return; }
+
+    // Exit: derive angle + radius from the actual lane position on the exit road
+    const exitLanes    = nextStep.fwd ? nextEdge.lanesForward : nextEdge.lanesBackward;
+    const exitLane     = car.id % Math.max(1, exitLanes);
+    const exitProgress = Math.min(0.4, CONFIG.RA_RING_RADIUS / nextEdge.length);
+    const exitPos  = nextEdge.carPosition(exitProgress, nextStep.fwd, exitLane);
+    const xDx = exitPos.x - roundaboutNode.x;
+    const xDy = exitPos.y - roundaboutNode.y;
+    const exitAngle  = Math.atan2(xDy, xDx);
+    const exitRadius = Math.hypot(xDx, xDy);
+
+    // Canvas Y-down: CW on screen = increasing angle.
+    // LHD (UK) = CW on screen; RHD (US/EU) = CCW on screen.
+    const cwCanvas = CONFIG.DRIVE_SIDE === 'left';
+    let sweep;
+    if (cwCanvas) {
+      sweep = ((exitAngle - entryAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      if (sweep < 0.01) sweep += 2 * Math.PI;
+    } else {
+      sweep = -(((entryAngle - exitAngle) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI));
+      if (Math.abs(sweep) < 0.01) sweep -= 2 * Math.PI;
+    }
+
+    const arcLen  = Math.abs(sweep) * CONFIG.RA_RING_RADIUS;
+    const duration = arcLen / (CONFIG.MAX_SPEED * 0.55);
+
+    car.raTransit = {
+      cx:           roundaboutNode.x,
+      cy:           roundaboutNode.y,
+      startR:       entryRadius,
+      endR:         exitRadius,
+      startA:       entryAngle,
+      sweep,
+      t:            0,
+      duration,
+      exitLane,
+      exitProgress,
+    };
+    car.state = 'roundabout';
   }
 
   _hasPermission(car, edge, node) {
@@ -129,31 +265,30 @@ class TrafficSimulation {
     const slotFree = this.simTime >= (node.lastExitTime[key] || 0);
     if (!slotFree) return false;
 
-    // Check next edge has room at its start
-    if (car.routeIdx + 1 < car.route.length) {
+    // Check next edge has room at its start.
+    // For roundabouts, ring car-following handles spacing — skip this check.
+    if (node.type !== 'roundabout' && car.routeIdx + 1 < car.route.length) {
       const nextStep = car.route[car.routeIdx + 1];
       const nextEdge = this.network.edges.get(nextStep.id);
       if (!nextEdge) return false;
-      // Check no car parked right at the start of next edge
       for (const other of this.cars) {
-        if (other === car || other.state === 'done') continue;
+        if (other === car || other.state === 'done' || other.raTransit) continue;
         if (other.edgeId === nextStep.id && other.fwd === nextStep.fwd && other.progress < 0.06) return false;
       }
     }
 
     const phase = approachPhase(edge, car.fwd);
 
-    if (node.type === 'basic') {
-      return node.basicPhase === phase;
-    }
-
+    if (node.type === 'basic')  return node.basicPhase === phase;
     if (node.type === 'signal') {
       if (node.signalState !== 'green') return false;
       return node.signalPhase === phase;
     }
-
     if (node.type === 'roundabout') {
-      return node.transitQueue.length < CONFIG.ROUNDABOUT_CAPACITY;
+      const onRing = this.cars.filter(c =>
+        c.raTransit && c.raTransit.cx === node.x && c.raTransit.cy === node.y
+      ).length;
+      return onRing < CONFIG.ROUNDABOUT_CAPACITY;
     }
 
     return true;
@@ -168,14 +303,11 @@ class TrafficSimulation {
       default:           transitTime = CONFIG.BASIC_TRANSIT;
     }
     node.lastExitTime[key] = this.simTime + transitTime;
-    if (node.type === 'roundabout') {
-      node.transitQueue.push({ timeLeft: transitTime * 2 });
-    }
+    // Roundabout capacity now tracked via car.raTransit; transitQueue no longer used
   }
 
   _advanceCar(car, edge, destNode) {
     if (car.routeIdx + 1 >= car.route.length) {
-      // Reached destination
       this._completedLog.push({ t: this.simTime, wait: car.waitTime });
       car.state = 'done';
       return;
@@ -184,7 +316,6 @@ class TrafficSimulation {
     car.progress = 0.0;
     car.state    = 'moving';
 
-    // Assign lane
     const nextEdge = this.network.edges.get(car.edgeId);
     if (nextEdge) {
       const lanes = car.fwd ? nextEdge.lanesForward : nextEdge.lanesBackward;
@@ -199,68 +330,78 @@ class TrafficSimulation {
       this._spawnTimers[i] -= dt;
       if (this._spawnTimers[i] <= 0) {
         this._spawnTimers[i] += 1 / demand.rate;
-        if (this.cars.length < MAX_CARS) {
-          this._spawnOne(demand);
-        }
+        if (this.cars.length < MAX_CARS) this._spawnOne(demand);
       }
     });
   }
 
   _spawnOne(demand) {
-    // Check first edge isn't jammed at origin
     const firstStep = demand.route[0];
     const edge = this.network.edges.get(firstStep.id);
     if (!edge) return;
+
+    // Don't spawn if origin is jammed (skip cars in roundabout transit)
     for (const c of this.cars) {
-      if (c.edgeId === firstStep.id && c.fwd === firstStep.fwd && c.progress < 0.05) return;
+      if (c.edgeId === firstStep.id && c.fwd === firstStep.fwd && c.progress < 0.05 && !c.raTransit) return;
     }
 
     const car = new Car(this._nextId++, demand.route.map(s => ({ ...s })));
-    // Assign initial lane
+
     const lanes = firstStep.fwd ? edge.lanesForward : edge.lanesBackward;
     car.lane = car.id % Math.max(1, lanes);
+
+    const lastStep = demand.route[demand.route.length - 1];
+    const lastEdge = this.network.edges.get(lastStep.id);
+    if (lastEdge) {
+      const destNode = lastStep.fwd ? lastEdge.to : lastEdge.from;
+      car.destNodeId = destNode.id;
+      car.color = destNode.color || CONFIG.C.CARS[car.id % CONFIG.C.CARS.length];
+    }
+
     this.cars.push(car);
   }
 
   // --- Stats ---
   getStats() {
     const now = this.simTime;
-    const window = 60; // sim-seconds
+    const window = 60;
 
-    // Throughput: completions in last 60 sim-seconds
     const recent = this._completedLog.filter(e => now - e.t < window);
-    const throughput = recent.length; // per window
+    const throughput = recent.length;
 
-    // Average wait time (recent completions)
     const avgWait = recent.length > 0
       ? recent.reduce((s, e) => s + e.wait, 0) / recent.length
       : 0;
 
-    // Congestion: fraction of active cars currently waiting
     const active  = this.cars.filter(c => c.state !== 'done').length;
     const waiting = this.cars.filter(c => c.state === 'waiting').length;
     const congestion = active > 0 ? waiting / active : 0;
 
-    // Score 0-100
     const score = this._calcScore(throughput, avgWait, congestion);
 
-    return { throughput, avgWait, congestion, score, carCount: active };
+    const destCounts = {};
+    this.cars.forEach(c => {
+      if (c.state !== 'done' && c.destNodeId !== null) {
+        destCounts[c.destNodeId] = (destCounts[c.destNodeId] || 0) + 1;
+      }
+    });
+
+    return { throughput, avgWait, congestion, score, carCount: active, destCounts };
   }
 
   _calcScore(throughput, avgWait, congestion) {
-    // Normalise: target throughput ≥ 60, avgWait ≤ 5s, congestion ≤ 0.1
     const tScore = Math.min(100, (throughput / 60) * 100);
-    const wScore = Math.max(0, 100 - (avgWait / 0.5)); // 0.5 sim-sec = fine
+    const wScore = Math.max(0, 100 - (avgWait / 0.5));
     const cScore = Math.max(0, 100 - congestion * 150);
     return Math.round((tScore * 0.4 + wScore * 0.35 + cScore * 0.25));
   }
 
-  // Per-edge congestion 0→1 for rendering
+  // Per-edge congestion 0→1 for rendering (excludes cars on roundabout ring)
   edgeCongestion(edgeId) {
     const e = this.network.edges.get(edgeId);
     if (!e) return 0;
-    const cars = this.cars.filter(c => c.edgeId === edgeId).length;
-    const cap   = (e.lanesForward + e.lanesBackward) * 4;
+    const cars = this.cars.filter(c => c.edgeId === edgeId && !c.raTransit).length;
+    const cap  = (e.lanesForward + e.lanesBackward) * 4;
     return Math.min(1, cars / cap);
   }
 }

@@ -85,6 +85,25 @@ class Game {
     document.getElementById('btn-simulate').addEventListener('click', () => this._startSimulate());
     document.getElementById('btn-edit').addEventListener('click',     () => this._stopSimulate());
     document.getElementById('btn-reset').addEventListener('click',    () => this._reset());
+
+    // Drive side toggle
+    const btnDrive = document.getElementById('btn-drive-side');
+    this._updateDriveSideBtn(btnDrive);
+    btnDrive.addEventListener('click', () => this._toggleDriveSide());
+  }
+
+  _toggleDriveSide() {
+    CONFIG.DRIVE_SIDE = CONFIG.DRIVE_SIDE === 'right' ? 'left' : 'right';
+    this._updateDriveSideBtn(document.getElementById('btn-drive-side'));
+    // Stop simulation and clear cars; road edits are preserved
+    this._stopSimulate();
+    this.simulation = new TrafficSimulation(this.network, this.demands);
+    this.selection  = null;
+    this._clearStats();
+  }
+
+  _updateDriveSideBtn(btn) {
+    btn.textContent = CONFIG.DRIVE_SIDE === 'right' ? '▶ Drive Right' : '◀ Drive Left';
   }
 
   _startSimulate() {

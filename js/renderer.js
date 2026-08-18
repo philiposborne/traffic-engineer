@@ -17,28 +17,30 @@ class Renderer {
     ctx.fillStyle = CONFIG.C.BG;
     ctx.fillRect(0, 0, W, H);
 
-    // Subtle grid
     this._drawGrid(W, H);
 
     // Edges — ground first, then bridges on top
     const edges = [...network.edges.values()];
-    const groundEdges  = edges.filter(e => e.elevation === 0);
-    const bridgeEdges  = edges.filter(e => e.elevation === 1);
+    const groundEdges = edges.filter(e => e.elevation === 0);
+    const bridgeEdges = edges.filter(e => e.elevation === 1);
 
     groundEdges.forEach(e => this._drawEdge(ctx, e, simulation, selection));
 
-    // Draw bridge shadows then surfaces
     bridgeEdges.forEach(e => this._drawBridgeShadow(ctx, e));
     bridgeEdges.forEach(e => this._drawEdge(ctx, e, simulation, selection, true));
 
-    // Nodes (intersections) — drawn on top of roads
+    // Non-terminal nodes (intersections) — drawn on top of roads
     network.nodes.forEach(n => {
       if (n.type !== 'terminal') this._drawNode(ctx, n, network, selection);
     });
 
-    // Cars
+    // Terminal destination markers
+    network.nodes.forEach(n => {
+      if (n.type === 'terminal') this._drawTerminalMarker(ctx, n);
+    });
+
+    // Cars — sorted so bridge cars render above ground cars
     if (simulation) {
-      // Sort so bridges render cars on top of ground cars
       const sorted = [...simulation.cars].sort((a, b) => {
         const ea = network.edges.get(a.edgeId);
         const eb = network.edges.get(b.edgeId);
@@ -52,6 +54,9 @@ class Renderer {
 
     // Mode badge
     this._drawModeBadge(ctx, gameMode, W);
+
+    // Destination arc gauges — drawn last so always on top
+    this._drawAllDestGauges(ctx, network, simulation, W, H);
   }
 
   _drawGrid(W, H) {
@@ -68,7 +73,7 @@ class Renderer {
   }
 
   _drawEdge(ctx, edge, sim, selection, isBridge = false) {
-    const { from, to, angle, length, lanesForward, lanesBackward } = edge;
+    const { from, angle, length, lanesForward, lanesBackward } = edge;
     const totalLanes = lanesForward + lanesBackward;
     const roadWidth  = totalLanes * CONFIG.LANE_WIDTH;
     const fullWidth  = roadWidth + CONFIG.SHOULDER_WIDTH * 2;
@@ -97,35 +102,28 @@ class Renderer {
     const lineColor = isBridge ? CONFIG.C.BRIDGE_RAIL : CONFIG.C.EDGE_LINE;
     ctx.strokeStyle = lineColor;
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(0,      -fullWidth / 2);
-    ctx.lineTo(length, -fullWidth / 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0,      fullWidth / 2);
-    ctx.lineTo(length, fullWidth / 2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -fullWidth / 2); ctx.lineTo(length, -fullWidth / 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,  fullWidth / 2); ctx.lineTo(length,  fullWidth / 2); ctx.stroke();
 
-    // Centre line (yellow, dashed)
+    // Centre line (yellow dashed)
     ctx.strokeStyle = CONFIG.C.CENTER_LINE;
     ctx.lineWidth   = 1.5;
     ctx.setLineDash([18, 12]);
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(length, 0);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(length, 0); ctx.stroke();
     ctx.setLineDash([]);
 
-    // Internal lane lines (white, dashed)
+    // Internal lane lines — direction depends on drive side
+    // keep-right: forward lanes at +Y; keep-left: forward lanes at −Y
+    const fwdSign = CONFIG.DRIVE_SIDE === 'right' ? 1 : -1;
     ctx.strokeStyle = CONFIG.C.LANE_LINE;
     ctx.lineWidth   = 1;
     ctx.setLineDash([12, 16]);
     for (let i = 1; i < lanesForward; i++) {
-      const y = i * CONFIG.LANE_WIDTH;
+      const y = fwdSign * i * CONFIG.LANE_WIDTH;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(length, y); ctx.stroke();
     }
     for (let i = 1; i < lanesBackward; i++) {
-      const y = -i * CONFIG.LANE_WIDTH;
+      const y = -fwdSign * i * CONFIG.LANE_WIDTH;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(length, y); ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -134,7 +132,7 @@ class Renderer {
   }
 
   _drawBridgeShadow(ctx, edge) {
-    const { from, to, angle, length } = edge;
+    const { from, angle, length } = edge;
     const fullWidth = edge.totalLanes * CONFIG.LANE_WIDTH + CONFIG.SHOULDER_WIDTH * 2;
 
     ctx.save();
@@ -157,15 +155,13 @@ class Renderer {
   }
 
   _drawIntersectionBlank(ctx, node, network) {
-    // Fill the intersection area with road colour to cover road-end artifacts
     const connectedEdges = node.edges;
     if (connectedEdges.length < 2) return;
 
-    // Find max half-width of any connected edge
     let maxHalf = 0;
     connectedEdges.forEach(e => { if (e.halfWidth > maxHalf) maxHalf = e.halfWidth; });
 
-    ctx.fillStyle = node.elevation > 0 ? CONFIG.C.BRIDGE_SURFACE : CONFIG.C.ROAD;
+    ctx.fillStyle = CONFIG.C.ROAD;
     ctx.beginPath();
     ctx.arc(node.x, node.y, maxHalf, 0, Math.PI * 2);
     ctx.fill();
@@ -175,38 +171,24 @@ class Renderer {
     const r = 32;
     const roadW = 12;
 
-    // Outer ring (road surface)
     ctx.fillStyle = CONFIG.C.RA_RING;
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r + roadW, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(node.x, node.y, r + roadW, 0, Math.PI * 2); ctx.fill();
 
-    // Central island
     ctx.fillStyle = CONFIG.C.RA_CENTER;
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(node.x, node.y, r, 0, Math.PI * 2); ctx.fill();
 
-    // Inner edge white ring
     ctx.strokeStyle = CONFIG.C.RA_MARKING;
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(node.x, node.y, r,        0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(node.x, node.y, r + roadW, 0, Math.PI * 2); ctx.stroke();
 
-    // Outer edge line
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, r + roadW, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Dashed yield lines from approaches
     node.edges.forEach(edge => {
-      const toNode = edge.to === node;
-      const angle  = toNode ? edge.angle + Math.PI : edge.angle; // towards node
+      const toNode   = edge.to === node;
+      const angle    = toNode ? edge.angle + Math.PI : edge.angle;
       const gapStart = r + roadW + 4;
       const gapEnd   = gapStart + 10;
       ctx.strokeStyle = CONFIG.C.RA_MARKING;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth   = 1.5;
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
       ctx.moveTo(node.x + Math.cos(angle) * gapStart, node.y + Math.sin(angle) * gapStart);
@@ -217,52 +199,83 @@ class Renderer {
   }
 
   _drawSignals(ctx, node, network) {
-    // Draw a small signal head at each approach arm
     node.edges.forEach(edge => {
-      const isTo = edge.to === node; // car arrives via this direction
+      const isTo     = edge.to === node;
       const arrAngle  = isTo ? edge.angle + Math.PI : edge.angle;
       const perpAngle = arrAngle + Math.PI / 2;
 
       const dist = 28;
       const hx = node.x + Math.cos(arrAngle) * dist;
       const hy = node.y + Math.sin(arrAngle) * dist;
-
-      // Offset to the side of the road
       const side = 10;
       const sx = hx + Math.cos(perpAngle) * side;
       const sy = hy + Math.sin(perpAngle) * side;
 
-      // Determine which phase this approach is
-      const phase = approachPhase(edge, !isTo);
-      const isGreen = node.signalPhase === phase && node.signalState === 'green';
+      const phase   = approachPhase(edge, !isTo);
+      const isGreen  = node.signalPhase === phase && node.signalState === 'green';
       const isYellow = node.signalState === 'yellow';
 
       const r = 5;
-      // Housing
       ctx.fillStyle = CONFIG.C.SIG_HOUSING;
       this._roundRect(ctx, sx - r - 2, sy - r * 3 - 4, r * 2 + 4, r * 6 + 8, 3);
       ctx.fill();
 
-      // Red
       ctx.fillStyle = (!isGreen && !isYellow) ? CONFIG.C.SIG_RED : CONFIG.C.SIG_OFF;
       ctx.beginPath(); ctx.arc(sx, sy - r - 2, r - 1, 0, Math.PI * 2); ctx.fill();
-      // Yellow
+
       ctx.fillStyle = isYellow ? CONFIG.C.SIG_YELLOW : CONFIG.C.SIG_OFF;
       ctx.beginPath(); ctx.arc(sx, sy, r - 1, 0, Math.PI * 2); ctx.fill();
-      // Green
+
       ctx.fillStyle = isGreen ? CONFIG.C.SIG_GREEN : CONFIG.C.SIG_OFF;
       ctx.beginPath(); ctx.arc(sx, sy + r + 2, r - 1, 0, Math.PI * 2); ctx.fill();
     });
   }
 
+  // Coloured circle at each terminal — destination identity marker on the road
+  _drawTerminalMarker(ctx, node) {
+    if (!node.color) return;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = node.color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+
   _drawCar(ctx, car, network) {
     if (car.state === 'done') return;
-    const edge = network.edges.get(car.edgeId);
-    if (!edge) return;
 
-    const lanes = car.fwd ? edge.lanesForward : edge.lanesBackward;
-    const lane  = Math.min(car.lane, Math.max(0, lanes - 1));
-    const pos   = edge.carPosition(car.progress, car.fwd, lane);
+    let pos;
+    if (car.raTransit) {
+      const frac = car.raTransit.duration > 0
+        ? Math.min(1, car.raTransit.t / car.raTransit.duration) : 1;
+      const a = car.raTransit.startA + car.raTransit.sweep * frac;
+      // Three-phase radius: blend from stop line → ring midline → exit lane.
+      // Car settles into RA_RING_RADIUS quickly, traverses there, then drifts to exit.
+      const E = 0.22;
+      let r;
+      if (frac <= E) {
+        const s = (t => t * t * (3 - 2 * t))(frac / E);
+        r = car.raTransit.startR + s * (CONFIG.RA_RING_RADIUS - car.raTransit.startR);
+      } else if (frac >= 1 - E) {
+        const s = (t => t * t * (3 - 2 * t))((frac - (1 - E)) / E);
+        r = CONFIG.RA_RING_RADIUS + s * (car.raTransit.endR - CONFIG.RA_RING_RADIUS);
+      } else {
+        r = CONFIG.RA_RING_RADIUS;
+      }
+      pos = {
+        x: car.raTransit.cx + r * Math.cos(a),
+        y: car.raTransit.cy + r * Math.sin(a),
+        angle: a + (car.raTransit.sweep >= 0 ? Math.PI / 2 : -Math.PI / 2),
+      };
+    } else {
+      const edge = network.edges.get(car.edgeId);
+      if (!edge) return;
+      const lanes = car.fwd ? edge.lanesForward : edge.lanesBackward;
+      const lane  = Math.min(car.lane, Math.max(0, lanes - 1));
+      pos = edge.carPosition(car.progress, car.fwd, lane);
+    }
 
     ctx.save();
     ctx.translate(pos.x, pos.y);
@@ -272,7 +285,6 @@ class Renderer {
     const W = CONFIG.CAR_WIDTH;
     const r = 2;
 
-    // Car body
     ctx.fillStyle = car.state === 'waiting' && car.waitTime > 2
       ? this._darken(car.color, 0.6)
       : car.color;
@@ -300,6 +312,7 @@ class Renderer {
       ctx.lineWidth   = 3;
       ctx.strokeRect(-2, -fullWidth / 2 - 2, edge.length + 4, fullWidth + 4);
       ctx.restore();
+
     } else if (selection.type === 'node') {
       const node = network.nodes.get(selection.id);
       if (!node) return;
@@ -314,13 +327,13 @@ class Renderer {
   }
 
   _drawModeBadge(ctx, mode, W) {
-    const label  = mode === 'simulate' ? '▶  SIMULATING' : '✏   EDIT MODE';
+    const label   = mode === 'simulate' ? '▶  SIMULATING' : '✏   EDIT MODE';
     const bgColor = mode === 'simulate' ? 'rgba(0,184,148,0.85)' : 'rgba(116,185,255,0.85)';
     ctx.font = 'bold 12px system-ui, sans-serif';
-    const tw = ctx.measureText(label).width;
+    const tw  = ctx.measureText(label).width;
     const pad = 10;
-    const bx = W - tw - pad * 2 - 12;
-    const by = 12;
+    const bx  = W - tw - pad * 2 - 12;
+    const by  = 12;
     ctx.fillStyle = bgColor;
     this._roundRect(ctx, bx, by, tw + pad * 2, 26, 6);
     ctx.fill();
@@ -328,7 +341,81 @@ class Renderer {
     ctx.fillText(label, bx + pad, by + 17);
   }
 
-  // --- Utilities ---
+  // ── Destination arc gauges ────────────────────────────────────────────────
+  // Small arc gauge near each terminal, outside the road network.
+  // Arc: 7 o'clock (0%) → clockwise → 5 o'clock (100%) = 300° sweep.
+  _drawAllDestGauges(ctx, network, simulation, W, H) {
+    const R   = 15;  // radius to stroke centre
+    const LW  = 5;   // stroke width
+    const PAD = R + LW + 2;
+
+    const START = 2 * Math.PI / 3;  // 120° = 7 o'clock
+    const SWEEP = 5 * Math.PI / 3;  // 300°
+
+    const MAX_COUNT = 20; // cars at this count = full arc
+
+    network.nodes.forEach(n => {
+      if (n.type !== 'terminal' || !n.color) return;
+
+      // Direction outward from the network (opposite of the connected edge)
+      const edge = n.edges[0];
+      if (!edge) return;
+      const intoX = (edge.to === n ? edge.from.x : edge.to.x) - n.x;
+      const intoY = (edge.to === n ? edge.from.y : edge.to.y) - n.y;
+      const ilen  = Math.hypot(intoX, intoY) || 1;
+      const outX  = -intoX / ilen;
+      const outY  = -intoY / ilen;
+
+      // Gauge centre — offset outward from terminal, clamped inside canvas
+      const OFFSET = R + LW + 10;
+      const gx = Math.round(Math.max(PAD, Math.min(W - PAD, n.x + outX * OFFSET)));
+      const gy = Math.round(Math.max(PAD, Math.min(H - PAD, n.y + outY * OFFSET)));
+
+      // Active car count for this destination
+      const count = simulation
+        ? simulation.cars.filter(c => c.destNodeId === n.id && c.state !== 'done').length
+        : 0;
+      const value = Math.min(1, count / MAX_COUNT);
+
+      // Background disc — makes count text readable over anything
+      ctx.beginPath();
+      ctx.arc(gx, gy, R - LW / 2 + 1, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(229,223,215,0.93)';
+      ctx.fill();
+
+      // Track arc (full 300°, muted)
+      ctx.beginPath();
+      ctx.arc(gx, gy, R, START, START + SWEEP, false);
+      ctx.strokeStyle = 'rgba(0,0,0,0.13)';
+      ctx.lineWidth   = LW;
+      ctx.lineCap     = 'round';
+      ctx.stroke();
+
+      // Value arc (destination colour)
+      if (value > 0.01) {
+        ctx.beginPath();
+        ctx.arc(gx, gy, R, START, START + SWEEP * value, false);
+        ctx.strokeStyle = n.color;
+        ctx.lineWidth   = LW;
+        ctx.lineCap     = 'round';
+        ctx.stroke();
+      }
+
+      // Centre count label
+      ctx.fillStyle    = 'rgba(0,0,0,0.72)';
+      ctx.font         = 'bold 9px system-ui, sans-serif';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(count), gx, gy);
+    });
+
+    // Restore defaults
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  // ── Utilities ─────────────────────────────────────────────────────────────
+
   _roundRect(ctx, x, y, w, h, r) {
     if (r === 0) { ctx.rect(x, y, w, h); return; }
     ctx.beginPath();
